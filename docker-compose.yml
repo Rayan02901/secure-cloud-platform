@@ -1,4 +1,10 @@
+version: "3.9"
+
 services:
-  placeholder:
-    image: alpine
-    command: ["echo", "Infrastructure initialized"]
+  crypto-service:
+    build: ./crypto-service-python
+    container_name: crypto-service
+    ports:
+      - "8002:8002"
+    environment:
+      - FERNET_KEY=${FERNET_KEY}
