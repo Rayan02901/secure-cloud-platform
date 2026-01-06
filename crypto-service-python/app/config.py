@@ -1,9 +1,20 @@
+# app/config.py
 import os
+from dotenv import load_dotenv
 from cryptography.fernet import Fernet
 
-FERNET_KEY = os.getenv("FERNET_KEY")
+# Load environment variables from .env file
+load_dotenv()
 
-if not FERNET_KEY:
-    raise RuntimeError("FERNET_KEY is not set")
+def get_cipher():
+    key = os.getenv("FERNET_KEY")
+    if not key:
+        raise RuntimeError("FERNET_KEY environment variable is not set")
+    
+    # Validate the key
+    try:
+        return Fernet(key.encode())
+    except Exception as e:
+        raise RuntimeError(f"Invalid FERNET_KEY: {e}")
 
-cipher = Fernet(FERNET_KEY.encode())
+cipher = get_cipher()
