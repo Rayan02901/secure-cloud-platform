@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.11.35219.272
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "auth-service-dotnet", "auth-service-dotnet.csproj", "{D68ADDE9-913A-4F90-91F4-D0E6001991C7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "auth-service-dotnet.Tests", "..\auth-service-dotnet.Tests\auth-service-dotnet.Tests.csproj", "{B033AF50-3F74-473A-8B31-FB977273C347}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D68ADDE9-913A-4F90-91F4-D0E6001991C7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D68ADDE9-913A-4F90-91F4-D0E6001991C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D68ADDE9-913A-4F90-91F4-D0E6001991C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D68ADDE9-913A-4F90-91F4-D0E6001991C7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B033AF50-3F74-473A-8B31-FB977273C347}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B033AF50-3F74-473A-8B31-FB977273C347}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B033AF50-3F74-473A-8B31-FB977273C347}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B033AF50-3F74-473A-8B31-FB977273C347}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {5912F925-0E4E-4836-B3E6-9769454733DF}
+	EndGlobalSection
+EndGlobal

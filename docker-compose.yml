@@ -2,9 +2,17 @@ version: "3.9"
 
 services:
   crypto-service:
-    build: ./crypto-service-python
+    build: 
+      context: ./crypto-service-python
+      dockerfile: Dockerfile
     container_name: crypto-service
     ports:
       - "8002:8002"
     environment:
       - FERNET_KEY=${FERNET_KEY}
+
+  auth-service:
+    build: ./auth-service-dotnet
+    container_name: auth-service
+    ports:
+      - "8001:8001"  
