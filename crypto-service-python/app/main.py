@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from datetime import datetime
 from .schemas import (
     EncryptRequest,
@@ -8,6 +8,7 @@ from .schemas import (
     HealthResponse
 )
 from .crypto import encrypt_data, decrypt_data
+from .security import verify_token  # Import the JWT verification function
 
 app = FastAPI(
     title="Crypto Service API",
@@ -26,13 +27,19 @@ async def health_check():
     )
 
 @app.post("/encrypt", response_model=EncryptResponse)
-async def encrypt(req: EncryptRequest):
+async def encrypt(
+    req: EncryptRequest,
+    token: str = Depends(verify_token)  # Add JWT authorization dependency
+):
     """Encrypt plaintext data."""
     ciphertext = encrypt_data(req.plaintext)
     return EncryptResponse(ciphertext=ciphertext)
 
 @app.post("/decrypt", response_model=DecryptResponse)
-async def decrypt(req: DecryptRequest):
+async def decrypt(
+    req: DecryptRequest,
+    token: str = Depends(verify_token)  # Add JWT authorization dependency
+):
     """Decrypt ciphertext data."""
     plaintext = decrypt_data(req.ciphertext)
     return DecryptResponse(plaintext=plaintext)
