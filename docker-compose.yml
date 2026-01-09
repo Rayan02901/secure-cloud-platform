@@ -10,6 +10,7 @@ services:
       - "8002:8002"
     environment:
       - FERNET_KEY=${FERNET_KEY}
+      - JWT_SECRET=${JWT_SECRET}
 
   auth-service:
     build: ./auth-service-dotnet
