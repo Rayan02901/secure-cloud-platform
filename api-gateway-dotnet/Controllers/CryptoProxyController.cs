@@ -27,8 +27,9 @@ namespace api_gateway_dotnet.Controllers
         {
             var token = Request.Headers["Authorization"]
                 .ToString().Replace("Bearer ", "");
+            Console.WriteLine($"[DEBUG] Services:Crypto = '{_config["Services:Crypto"]}'");
 
-            var url = $"{_config["http://localhost:8002"]}/encrypt";
+            var url = $"{_config["Services:Crypto"]}/encrypt";
             var response = await _proxy.ForwardAsync(url, Request, token);
             var content = await response.Content.ReadAsStringAsync();
 
