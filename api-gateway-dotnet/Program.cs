@@ -1,9 +1,11 @@
 using api_gateway_dotnet.Services;
 using api_gateway_dotnet.Services.Interface;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics;  
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
+using System.Text.Json;  
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddScoped<IProxyService, ProxyService>();
@@ -53,19 +55,43 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         ValidIssuer = builder.Configuration["Jwt:Issuer"],
         ValidAudience = builder.Configuration["Jwt:Audience"],
         IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"])
+            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key not configured"))
         )
     };
 });
 builder.WebHost.UseUrls("http://0.0.0.0:8000");
+builder.Services.AddAuthorization();
 var app = builder.Build();
+if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
-app.UseSwagger();
-app.UseSwaggerUI();
-
+app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 
+// Global exception handler
+app.UseExceptionHandler(exceptionHandlerApp =>
+{
+    exceptionHandlerApp.Run(async context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+        
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        var exception = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+        
+        logger.LogError(exception, "Unhandled exception occurred");
+        
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new
+        {
+            error = "An unexpected error occurred",
+            requestId = context.TraceIdentifier
+        }));
+    });
+});
 app.Run();
