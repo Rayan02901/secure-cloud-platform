@@ -1,0 +1,3 @@
+@echo off
+echo Starting Crypto Service on port 8002...
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8002 > crypto-service.log 2>&1

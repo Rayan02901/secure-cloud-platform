@@ -1,0 +1,3 @@
+@echo off
+echo Starting Auth Service on port 8001...
+dotnet run  > auth-service.log 2>&1

@@ -1,4 +1,6 @@
 #test_api.py
+import os
+import requests
 import pytest
 import sys
 from pathlib import Path
@@ -17,6 +19,26 @@ TEST_KEY = Fernet.generate_key()
 TEST_CIPHER = Fernet(TEST_KEY)
 
 client = TestClient(app)
+
+# Get auth token from environment or make request
+def get_auth_token():
+    token = os.getenv("AUTH_TOKEN")
+    if not token:
+        # Try to get token from auth service
+        try:
+            response = requests.post(
+                "http://localhost:5000/api/auth/login",
+                json={"email": "admin@example.com", "password": "admin123"}
+            )
+            if response.status_code == 200:
+                token = response.json()["token"]
+        except:
+            token = "mock_token_for_testing"
+    return token
+
+# Add auth header to your test requests
+def auth_headers():
+    return {"Authorization": f"Bearer {get_auth_token()}"}
 
 class TestHealthEndpoint:
     def test_health_check(self):

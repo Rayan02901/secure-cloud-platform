@@ -1,0 +1,3 @@
+@echo off
+echo Starting API Gateway on port 8003...
+dotnet run --urls "http://localhost:8003" > api-gateway.log 2>&1
