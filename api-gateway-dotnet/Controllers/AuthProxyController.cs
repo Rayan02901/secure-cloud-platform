@@ -2,6 +2,7 @@ using api_gateway_dotnet.Services.Interface;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace api_gateway_dotnet.Controllers
 {
@@ -10,55 +11,77 @@ namespace api_gateway_dotnet.Controllers
     public class AuthProxyController : ControllerBase
     {
         private readonly IProxyService _proxy;
+	private readonly IAuthCookieService _authCookie;
         private readonly IConfiguration _config;
         private readonly ILogger<AuthProxyController> _logger;
 
         public AuthProxyController(
             IProxyService proxy,
+	    IAuthCookieService authCookie,
             IConfiguration config,
             ILogger<AuthProxyController> logger
         )
         {
             _proxy = proxy;
+	    _authCookie = authCookie;
             _config = config;
             _logger = logger;
         }
 
         [AllowAnonymous]
-        [HttpPost("login")]
-        public async Task<IActionResult> Login()
+[HttpPost("login")]
+public async Task<IActionResult> Login()
+{
+    try
+    {
+        _logger.LogInformation("Processing login request");
+        
+        var authServiceUrl = _config["Services:Auth"];
+        _logger.LogDebug($"Auth service URL: {authServiceUrl}");
+        
+        var url = $"{authServiceUrl}/api/auth/login";
+        var response = await _proxy.ForwardAsync(url, Request, null); // No token needed for login
+        var content = await response.Content.ReadAsStringAsync();
+
+        _logger.LogInformation($"Login response status: {response.StatusCode}");
+        
+        if (response.IsSuccessStatusCode)
         {
+            _logger.LogInformation("Login successful");
+            
+            // Extract token from response if login was successful
             try
             {
-                _logger.LogInformation("Processing login request");
-                
-                var authServiceUrl = _config["Services:Auth"];
-                _logger.LogDebug($"Auth service URL: {authServiceUrl}");
-                
-                var url = $"{authServiceUrl}/api/auth/login";
-                var response = await _proxy.ForwardAsync(url, Request, null); // No token needed for login
-                var content = await response.Content.ReadAsStringAsync();
-
-                _logger.LogInformation($"Login response status: {response.StatusCode}");
-                
-                // Log successful login attempts (without sensitive data)
-                if (response.IsSuccessStatusCode)
+                var result = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(content);
+                if (result.TryGetProperty("token", out var tokenElement))
                 {
-                    _logger.LogInformation("Login successful");
+                    var token = tokenElement.GetString();
+                    _authCookie.SetJwtCookie(Response, token);
+                    _logger.LogDebug("JWT cookie set successfully");
                 }
                 else
                 {
-                    _logger.LogWarning($"Login failed with status: {response.StatusCode}");
+                    _logger.LogWarning("Login response doesn't contain 'token' property");
                 }
-
-                return StatusCode((int)response.StatusCode, content);
             }
-            catch (Exception ex)
+            catch (Exception jsonEx)
             {
-                _logger.LogError(ex, "Error processing login request");
-                return StatusCode(500, new { error = "Internal server error during authentication" });
+                _logger.LogWarning(jsonEx, "Failed to parse token from auth response");
             }
         }
+        else
+        {
+            _logger.LogWarning($"Login failed with status: {response.StatusCode}");
+        }
+
+        return StatusCode((int)response.StatusCode, content);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Error processing login request");
+        return StatusCode(500, new { error = "Internal server error during authentication" });
+    }
+}
 
         [Authorize]
         [HttpPost("verify")]
@@ -196,6 +219,7 @@ namespace api_gateway_dotnet.Controllers
                 var content = await response.Content.ReadAsStringAsync();
 
                 _logger.LogInformation($"Logout response status: {response.StatusCode}");
+		_authCookie.ClearJwtCookie(Response);
                 return StatusCode((int)response.StatusCode, content);
             }
             catch (Exception ex)

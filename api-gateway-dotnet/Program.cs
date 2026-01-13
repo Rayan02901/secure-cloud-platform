@@ -9,6 +9,7 @@ using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddScoped<IProxyService, ProxyService>();
+builder.Services.AddScoped<IAuthCookieService, AuthCookieService>();
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
 builder.Services.AddEndpointsApiExplorer();
@@ -57,6 +58,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         IssuerSigningKey = new SymmetricSecurityKey(
             Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key not configured"))
         )
+    };
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            context.Token = context.Request.Cookies["access_token"];
+            return Task.CompletedTask;
+        }
     };
 });
 builder.WebHost.UseUrls("http://0.0.0.0:8000");
