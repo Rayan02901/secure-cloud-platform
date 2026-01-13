@@ -28,7 +28,7 @@ namespace api_gateway_dotnet.Controllers
             _logger = logger;
         }
 
-        [AllowAnonymous]
+[AllowAnonymous]
 [HttpPost("login")]
 public async Task<IActionResult> Login()
 {
@@ -40,7 +40,7 @@ public async Task<IActionResult> Login()
         _logger.LogDebug($"Auth service URL: {authServiceUrl}");
         
         var url = $"{authServiceUrl}/api/auth/login";
-        var response = await _proxy.ForwardAsync(url, Request, null); // No token needed for login
+        var response = await _proxy.ForwardAsync(url, Request, null);
         var content = await response.Content.ReadAsStringAsync();
 
         _logger.LogInformation($"Login response status: {response.StatusCode}");
@@ -52,12 +52,30 @@ public async Task<IActionResult> Login()
             // Extract token from response if login was successful
             try
             {
-                var result = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(content);
+                var result = JsonSerializer.Deserialize<JsonElement>(content);
                 if (result.TryGetProperty("token", out var tokenElement))
                 {
                     var token = tokenElement.GetString();
-                    _authCookie.SetJwtCookie(Response, token);
-                    _logger.LogDebug("JWT cookie set successfully");
+                    if (!string.IsNullOrEmpty(token))
+                    {
+                        // Set JWT as HttpOnly cookie
+                        _authCookie.SetJwtCookie(Response, token);
+                        _logger.LogDebug("JWT cookie set successfully");
+                        
+                        // Remove token from response body - send only success message
+                        // Option 1: Return minimal success response
+                        return Ok(new 
+                        { 
+                            success = true, 
+                            message = "Authentication successful" 
+                        });
+                        
+                        // Option 2: Return original response WITHOUT the token
+                        // Remove token property if it exists
+                        // var responseObject = JsonSerializer.Deserialize<Dictionary<string, object>>(content);
+                        // responseObject?.Remove("token");
+                        // return StatusCode((int)response.StatusCode, responseObject);
+                    }
                 }
                 else
                 {
@@ -74,6 +92,7 @@ public async Task<IActionResult> Login()
             _logger.LogWarning($"Login failed with status: {response.StatusCode}");
         }
 
+        // For non-success responses or if token extraction failed, return original
         return StatusCode((int)response.StatusCode, content);
     }
     catch (Exception ex)
@@ -231,7 +250,13 @@ public async Task<IActionResult> Login()
 
         private string ExtractBearerToken()
         {
-            var authHeader = Request.Headers["Authorization"].ToString();
+            if (Request.Cookies.ContainsKey("access_token"))
+    	    {
+        	var token = Request.Cookies["access_token"];
+        	_logger.LogDebug("Extracted token from cookie");
+        	return token;
+    	    }
+	    var authHeader = Request.Headers["Authorization"].ToString();
             
             if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer "))
             {

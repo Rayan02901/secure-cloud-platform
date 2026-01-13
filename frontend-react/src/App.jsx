@@ -1,30 +1,28 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider, AuthContext } from "./auth/AuthContext";
-import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
-import { useContext } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './auth/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
 
-const PrivateRoute = ({ children }) => {
-  const { token } = useContext(AuthContext);
-  return token ? children : <Navigate to="/login" />;
-};
-
-export default function App() {
+function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
+    <BrowserRouter>
+      <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route
-            path="/"
+          <Route 
+            path="/dashboard" 
             element={
-              <PrivateRoute>
+              <ProtectedRoute>
                 <Dashboard />
-              </PrivateRoute>
-            }
+              </ProtectedRoute>
+            } 
           />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
         </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
+
+export default App;
