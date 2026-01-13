@@ -28,25 +28,60 @@ namespace api_gateway_dotnet.Controllers
             _logger = logger;
         }
 
-        [HttpPost("login")]
-	[AllowAnonymous]
-	public async Task<IActionResult> Login()
-	{
-	    var url = $"{_config["Services:Auth"]}/login";
-	    var response = await _proxy.ForwardAsync(url, Request, token: null);
-	    var content = await response.Content.ReadAsStringAsync();
-	
-	    if (!response.IsSuccessStatusCode)
-	        return StatusCode((int)response.StatusCode, content);
-	
-	    var json = JsonDocument.Parse(content);
-	    var token = json.RootElement.GetProperty("access_token").GetString();
-	
-	    _authCookie.SetJwtCookie(Response, token);
-	
-	    return Ok(new { message = "Login successful" });
-	}
+        [AllowAnonymous]
+[HttpPost("login")]
+public async Task<IActionResult> Login()
+{
+    try
+    {
+        _logger.LogInformation("Processing login request");
+        
+        var authServiceUrl = _config["Services:Auth"];
+        _logger.LogDebug($"Auth service URL: {authServiceUrl}");
+        
+        var url = $"{authServiceUrl}/api/auth/login";
+        var response = await _proxy.ForwardAsync(url, Request, null); // No token needed for login
+        var content = await response.Content.ReadAsStringAsync();
 
+        _logger.LogInformation($"Login response status: {response.StatusCode}");
+        
+        if (response.IsSuccessStatusCode)
+        {
+            _logger.LogInformation("Login successful");
+            
+            // Extract token from response if login was successful
+            try
+            {
+                var result = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(content);
+                if (result.TryGetProperty("token", out var tokenElement))
+                {
+                    var token = tokenElement.GetString();
+                    _authCookie.SetJwtCookie(Response, token);
+                    _logger.LogDebug("JWT cookie set successfully");
+                }
+                else
+                {
+                    _logger.LogWarning("Login response doesn't contain 'token' property");
+                }
+            }
+            catch (Exception jsonEx)
+            {
+                _logger.LogWarning(jsonEx, "Failed to parse token from auth response");
+            }
+        }
+        else
+        {
+            _logger.LogWarning($"Login failed with status: {response.StatusCode}");
+        }
+
+        return StatusCode((int)response.StatusCode, content);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Error processing login request");
+        return StatusCode(500, new { error = "Internal server error during authentication" });
+    }
+}
 
         [Authorize]
         [HttpPost("verify")]
@@ -170,12 +205,29 @@ namespace api_gateway_dotnet.Controllers
 
 	[Authorize]
         [HttpPost("logout")]
-	public IActionResult Logout()
-	{
-	    _authCookie.ClearJwtCookie(Response);
-	    return Ok(new { message = "Logged out" });
-	}
+        public async Task<IActionResult> Logout()
+        {
+            try
+            {
+                _logger.LogInformation("Processing logout request");
+                var token = ExtractBearerToken();
+                
+                var authServiceUrl = _config["Services:Auth"];
+                var url = $"{authServiceUrl}/api/auth/logout";
+                
+                var response = await _proxy.ForwardAsync(url, Request, token);
+                var content = await response.Content.ReadAsStringAsync();
 
+                _logger.LogInformation($"Logout response status: {response.StatusCode}");
+		_authCookie.ClearJwtCookie(Response);
+                return StatusCode((int)response.StatusCode, content);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing logout");
+                return StatusCode(500, new { error = "Internal server error during logout" });
+            }
+        }
 
         private string ExtractBearerToken()
         {
