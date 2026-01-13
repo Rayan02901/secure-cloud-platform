@@ -38,6 +38,12 @@ namespace api_gateway_dotnet.Services
                 );
 
                 // Add authorization header if token is provided
+                if (!string.IsNullOrEmpty(token))
+                {
+                    forwardRequest.Headers.Authorization =
+                        new AuthenticationHeaderValue("Bearer", token);
+                    _logger.LogDebug("Added Bearer token to forwarded request");
+                }
                 if (request.Cookies.ContainsKey("access_token"))
 	        {
 	            forwardRequest.Headers.Authorization =
@@ -45,6 +51,7 @@ namespace api_gateway_dotnet.Services
 	                    "Bearer",
 	                    request.Cookies["access_token"]
 	                );
+		    _logger.LogDebug("Added Bearer token to forwarded request via Cookie");
 	        }
 
                 // Copy content type
