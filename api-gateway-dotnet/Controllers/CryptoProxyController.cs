@@ -104,7 +104,14 @@ namespace api_gateway_dotnet.Controllers
 
         private string ExtractBearerToken()
         {
-            var authHeader = Request.Headers["Authorization"].ToString();
+            // First check cookies
+    	    if (Request.Cookies.ContainsKey("access_token"))
+    	    {
+        	var token = Request.Cookies["access_token"];
+        	_logger.LogDebug("Extracted token from cookie");
+        	return token;
+    	    }
+	    var authHeader = Request.Headers["Authorization"].ToString();
             
             if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer "))
             {
