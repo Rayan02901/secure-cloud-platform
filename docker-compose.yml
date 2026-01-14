@@ -1,13 +1,14 @@
-services:
+version: '3.8'
 
+services:
   jaeger:
     image: jaegertracing/all-in-one:latest
     container_name: jaeger
     ports:
-      - "16686:16686"  # Web UI
-      - "14268:14268"  # HTTP collector
-      - "14250:14250"  # gRPC collector
-      - "6831:6831/udp"  # UDP port for Jaeger agent
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "6831:6831/udp"
 
   crypto-service:
     build: 
@@ -25,13 +26,41 @@ services:
   api-gateway:
     build: ./api-gateway-dotnet
     container_name: api-gateway
+    ports:
+      - "8000:8000"
     environment:
       - ASPNETCORE_ENVIRONMENT=Docker
       - JWT_SECRET=${JWT_SECRET}
     depends_on:
-      - jaeger  # Add this dependency
+      - jaeger
       - auth-service
       - crypto-service
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - api-gateway
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      # Mount provisioning for auto-configuration
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      # Mount dashboards
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
 
   nginx:
     image: nginx:alpine
