@@ -11,124 +11,181 @@ namespace api_gateway_dotnet.Controllers
     public class AuthProxyController : ControllerBase
     {
         private readonly IProxyService _proxy;
-	private readonly IAuthCookieService _authCookie;
+        private readonly IAuthCookieService _authCookie;
         private readonly IConfiguration _config;
         private readonly ILogger<AuthProxyController> _logger;
 
         public AuthProxyController(
             IProxyService proxy,
-	    IAuthCookieService authCookie,
+            IAuthCookieService authCookie,
             IConfiguration config,
             ILogger<AuthProxyController> logger
         )
         {
             _proxy = proxy;
-	    _authCookie = authCookie;
+            _authCookie = authCookie;
             _config = config;
             _logger = logger;
         }
 
-[AllowAnonymous]
-[HttpPost("login")]
-public async Task<IActionResult> Login()
-{
-    try
-    {
-        _logger.LogInformation("Processing login request");
-        
-        var authServiceUrl = _config["Services:Auth"];
-        _logger.LogDebug($"Auth service URL: {authServiceUrl}");
-        
-        var url = $"{authServiceUrl}/api/auth/login";
-        var response = await _proxy.ForwardAsync(url, Request, null);
-        var content = await response.Content.ReadAsStringAsync();
-
-        _logger.LogInformation($"Login response status: {response.StatusCode}");
-        
-        if (response.IsSuccessStatusCode)
+        [AllowAnonymous]
+        [HttpPost("login")]
+        public async Task<IActionResult> Login()
         {
-            _logger.LogInformation("Login successful");
+            // Add correlation ID for better tracing
+            var correlationId = Guid.NewGuid().ToString();
             
-            // Extract token from response if login was successful
-            try
+            using (_logger.BeginScope(new Dictionary<string, object>
             {
-                var result = JsonSerializer.Deserialize<JsonElement>(content);
-                if (result.TryGetProperty("token", out var tokenElement))
-                {
-                    var token = tokenElement.GetString();
-                    if (!string.IsNullOrEmpty(token))
-                    {
-                        // Set JWT as HttpOnly cookie
-                        _authCookie.SetJwtCookie(Response, token);
-                        _logger.LogDebug("JWT cookie set successfully");
-                        
-                        // Remove token from response body - send only success message
-                        // Option 1: Return minimal success response
-                        return Ok(new 
-                        { 
-                            success = true, 
-                            message = "Authentication successful" 
-                        });
-                        
-                        // Option 2: Return original response WITHOUT the token
-                        // Remove token property if it exists
-                        // var responseObject = JsonSerializer.Deserialize<Dictionary<string, object>>(content);
-                        // responseObject?.Remove("token");
-                        // return StatusCode((int)response.StatusCode, responseObject);
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning("Login response doesn't contain 'token' property");
-                }
-            }
-            catch (Exception jsonEx)
+                ["CorrelationId"] = correlationId,
+                ["Endpoint"] = "auth/login",
+                ["Method"] = Request.Method
+            }))
             {
-                _logger.LogWarning(jsonEx, "Failed to parse token from auth response");
-            }
-        }
-        else
-        {
-            _logger.LogWarning($"Login failed with status: {response.StatusCode}");
-        }
+                try
+                {
+                    _logger.LogInformation("Processing login request");
+                    
+                    var authServiceUrl = _config["Services:Auth"];
+                    _logger.LogDebug("Auth service URL: {AuthServiceUrl}", authServiceUrl);
+                    
+                    var url = $"{authServiceUrl}/api/auth/login";
+                    
+                    _logger.LogInformation("Forwarding login request to {Url}", url);
+                    var response = await _proxy.ForwardAsync(url, Request, null);
+                    var content = await response.Content.ReadAsStringAsync();
 
-        // For non-success responses or if token extraction failed, return original
-        return StatusCode((int)response.StatusCode, content);
-    }
-    catch (Exception ex)
-    {
-        _logger.LogError(ex, "Error processing login request");
-        return StatusCode(500, new { error = "Internal server error during authentication" });
-    }
-}
+                    _logger.LogInformation(
+                        "Login response received - Status: {StatusCode}, ContentLength: {ContentLength}",
+                        response.StatusCode,
+                        content.Length
+                    );
+                    
+                    if (response.IsSuccessStatusCode)
+                    {
+                        _logger.LogInformation("Login successful");
+                        
+                        // Extract token from response if login was successful
+                        try
+                        {
+                            var result = JsonSerializer.Deserialize<JsonElement>(content);
+                            if (result.TryGetProperty("token", out var tokenElement))
+                            {
+                                var token = tokenElement.GetString();
+                                if (!string.IsNullOrEmpty(token))
+                                {
+                                    // Set JWT as HttpOnly cookie
+                                    _authCookie.SetJwtCookie(Response, token);
+                                    _logger.LogDebug("JWT cookie set successfully");
+                                    
+                                    // Log token info (without exposing the actual token)
+                                    _logger.LogInformation(
+                                        "Token received and stored in cookie. Token length: {TokenLength}",
+                                        token.Length
+                                    );
+                                    
+                                    // Return minimal success response
+                                    return Ok(new 
+                                    { 
+                                        success = true, 
+                                        message = "Authentication successful" 
+                                    });
+                                }
+                                else
+                                {
+                                    _logger.LogWarning("Token property exists but is null or empty");
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Login response doesn't contain 'token' property. Response: {@Response}", 
+                                    new { StatusCode = response.StatusCode, HasContent = !string.IsNullOrEmpty(content) });
+                            }
+                        }
+                        catch (JsonException jsonEx)
+                        {
+                            _logger.LogError(jsonEx, "Failed to parse JSON response from auth service");
+                        }
+                        catch (Exception parseEx)
+                        {
+                            _logger.LogError(parseEx, "Failed to parse token from auth response");
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "Login failed with status: {StatusCode}. Response: {ResponseContent}",
+                            response.StatusCode,
+                            content
+                        );
+                    }
+
+                    // For non-success responses or if token extraction failed, return original
+                    return StatusCode((int)response.StatusCode, content);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing login request. CorrelationId: {CorrelationId}", correlationId);
+                    return StatusCode(500, new 
+                    { 
+                        error = "Internal server error during authentication",
+                        correlationId = correlationId 
+                    });
+                }
+            }
+        }
 
         [Authorize]
         [HttpPost("verify")]
         public async Task<IActionResult> VerifyToken()
         {
-            try
+            var correlationId = Guid.NewGuid().ToString();
+            
+            using (_logger.BeginScope(new Dictionary<string, object>
             {
-                _logger.LogInformation("Processing token verification request");
-                var token = ExtractBearerToken();
-                
-                var authServiceUrl = _config["Services:Auth"];
-                var url = $"{authServiceUrl}/api/auth/verify";
-                
-                var response = await _proxy.ForwardAsync(url, Request, token);
-                var content = await response.Content.ReadAsStringAsync();
+                ["CorrelationId"] = correlationId,
+                ["Endpoint"] = "auth/verify",
+                ["Method"] = Request.Method,
+                ["UserId"] = User.Identity?.Name ?? "unknown"
+            }))
+            {
+                try
+                {
+                    _logger.LogInformation("Processing token verification request");
+                    var token = ExtractBearerToken();
+                    
+                    var authServiceUrl = _config["Services:Auth"];
+                    var url = $"{authServiceUrl}/api/auth/verify";
+                    
+                    _logger.LogDebug("Forwarding to auth service: {Url}", url);
+                    var response = await _proxy.ForwardAsync(url, Request, token);
+                    var content = await response.Content.ReadAsStringAsync();
 
-                _logger.LogInformation($"Verify response status: {response.StatusCode}");
-                return StatusCode((int)response.StatusCode, content);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                _logger.LogWarning("Token verification failed - no valid token provided");
-                return Unauthorized(new { error = "No valid authorization token provided" });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error verifying token");
-                return StatusCode(500, new { error = "Internal server error during token verification" });
+                    _logger.LogInformation(
+                        "Token verification response - Status: {StatusCode}",
+                        response.StatusCode
+                    );
+                    
+                    return StatusCode((int)response.StatusCode, content);
+                }
+                catch (UnauthorizedAccessException uaEx)
+                {
+                    _logger.LogWarning(uaEx, "Token verification failed - no valid token provided");
+                    return Unauthorized(new 
+                    { 
+                        error = "No valid authorization token provided",
+                        correlationId = correlationId 
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error verifying token. CorrelationId: {CorrelationId}", correlationId);
+                    return StatusCode(500, new 
+                    { 
+                        error = "Internal server error during token verification",
+                        correlationId = correlationId 
+                    });
+                }
             }
         }
 
@@ -136,29 +193,74 @@ public async Task<IActionResult> Login()
         [HttpGet("health")]
         public async Task<IActionResult> Health()
         {
-            try
+            var correlationId = Guid.NewGuid().ToString();
+            
+            using (_logger.BeginScope(new Dictionary<string, object>
             {
-                _logger.LogDebug("Checking auth service health");
-                var authServiceUrl = _config["Services:Auth"];
-                var url = $"{authServiceUrl}/api/auth/health";
-                
-                var client = new HttpClient();
-                var response = await client.GetAsync(url);
-                var content = await response.Content.ReadAsStringAsync();
+                ["CorrelationId"] = correlationId,
+                ["Endpoint"] = "auth/health",
+                ["Method"] = Request.Method
+            }))
+            {
+                try
+                {
+                    _logger.LogInformation("Checking auth service health");
+                    var authServiceUrl = _config["Services:Auth"];
+                    
+                    if (string.IsNullOrEmpty(authServiceUrl))
+                    {
+                        _logger.LogError("Auth service URL is not configured");
+                        return StatusCode(503, new 
+                        { 
+                            status = "unhealthy",
+                            service = "auth-service",
+                            error = "Service URL not configured",
+                            correlationId = correlationId,
+                            timestamp = DateTime.UtcNow
+                        });
+                    }
+                    
+                    var url = $"{authServiceUrl}/api/auth/health";
+                    _logger.LogDebug("Health check URL: {Url}", url);
+                    
+                    using var client = new HttpClient();
+                    client.Timeout = TimeSpan.FromSeconds(5);
+                    
+                    var response = await client.GetAsync(url);
+                    var content = await response.Content.ReadAsStringAsync();
 
-                _logger.LogInformation($"Auth health check status: {response.StatusCode}");
-                return StatusCode((int)response.StatusCode, content);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error checking auth service health");
-                return StatusCode(503, new 
-                { 
-                    status = "unhealthy",
-                    service = "auth-service",
-                    error = ex.Message,
-                    timestamp = DateTime.UtcNow
-                });
+                    _logger.LogInformation(
+                        "Auth health check completed - Status: {StatusCode}, Response: {Content}",
+                        response.StatusCode,
+                        content
+                    );
+                    
+                    return StatusCode((int)response.StatusCode, content);
+                }
+                catch (TaskCanceledException timeoutEx)
+                {
+                    _logger.LogError(timeoutEx, "Auth service health check timed out. CorrelationId: {CorrelationId}", correlationId);
+                    return StatusCode(503, new 
+                    { 
+                        status = "unhealthy",
+                        service = "auth-service",
+                        error = "Service timeout",
+                        correlationId = correlationId,
+                        timestamp = DateTime.UtcNow
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error checking auth service health. CorrelationId: {CorrelationId}", correlationId);
+                    return StatusCode(503, new 
+                    { 
+                        status = "unhealthy",
+                        service = "auth-service",
+                        error = ex.Message,
+                        correlationId = correlationId,
+                        timestamp = DateTime.UtcNow
+                    });
+                }
             }
         }
 
@@ -166,29 +268,53 @@ public async Task<IActionResult> Login()
         [HttpPost("refresh")]
         public async Task<IActionResult> RefreshToken()
         {
-            try
+            var correlationId = Guid.NewGuid().ToString();
+            
+            using (_logger.BeginScope(new Dictionary<string, object>
             {
-                _logger.LogInformation("Processing token refresh request");
-                var token = ExtractBearerToken();
-                
-                var authServiceUrl = _config["Services:Auth"];
-                var url = $"{authServiceUrl}/api/auth/refresh";
-                
-                var response = await _proxy.ForwardAsync(url, Request, token);
-                var content = await response.Content.ReadAsStringAsync();
+                ["CorrelationId"] = correlationId,
+                ["Endpoint"] = "auth/refresh",
+                ["Method"] = Request.Method,
+                ["UserId"] = User.Identity?.Name ?? "unknown"
+            }))
+            {
+                try
+                {
+                    _logger.LogInformation("Processing token refresh request");
+                    var token = ExtractBearerToken();
+                    
+                    var authServiceUrl = _config["Services:Auth"];
+                    var url = $"{authServiceUrl}/api/auth/refresh";
+                    
+                    _logger.LogDebug("Forwarding refresh request to: {Url}", url);
+                    var response = await _proxy.ForwardAsync(url, Request, token);
+                    var content = await response.Content.ReadAsStringAsync();
 
-                _logger.LogInformation($"Refresh response status: {response.StatusCode}");
-                return StatusCode((int)response.StatusCode, content);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                _logger.LogWarning("Token refresh failed - no valid token provided");
-                return Unauthorized(new { error = "No valid authorization token provided" });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error refreshing token");
-                return StatusCode(500, new { error = "Internal server error during token refresh" });
+                    _logger.LogInformation(
+                        "Token refresh response - Status: {StatusCode}",
+                        response.StatusCode
+                    );
+                    
+                    return StatusCode((int)response.StatusCode, content);
+                }
+                catch (UnauthorizedAccessException uaEx)
+                {
+                    _logger.LogWarning(uaEx, "Token refresh failed - no valid token provided");
+                    return Unauthorized(new 
+                    { 
+                        error = "No valid authorization token provided",
+                        correlationId = correlationId 
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error refreshing token. CorrelationId: {CorrelationId}", correlationId);
+                    return StatusCode(500, new 
+                    { 
+                        error = "Internal server error during token refresh",
+                        correlationId = correlationId 
+                    });
+                }
             }
         }
 
@@ -196,75 +322,126 @@ public async Task<IActionResult> Login()
         [HttpGet("userinfo")]
         public async Task<IActionResult> GetUserInfo()
         {
-            try
+            var correlationId = Guid.NewGuid().ToString();
+            
+            using (_logger.BeginScope(new Dictionary<string, object>
             {
-                _logger.LogInformation("Processing user info request");
-                var token = ExtractBearerToken();
-                
-                var authServiceUrl = _config["Services:Auth"];
-                var url = $"{authServiceUrl}/api/auth/userinfo";
-                
-                var response = await _proxy.ForwardAsync(url, Request, token);
-                var content = await response.Content.ReadAsStringAsync();
+                ["CorrelationId"] = correlationId,
+                ["Endpoint"] = "auth/userinfo",
+                ["Method"] = Request.Method,
+                ["UserId"] = User.Identity?.Name ?? "unknown"
+            }))
+            {
+                try
+                {
+                    _logger.LogInformation("Processing user info request");
+                    var token = ExtractBearerToken();
+                    
+                    var authServiceUrl = _config["Services:Auth"];
+                    var url = $"{authServiceUrl}/api/auth/userinfo";
+                    
+                    _logger.LogDebug("Forwarding user info request to: {Url}", url);
+                    var response = await _proxy.ForwardAsync(url, Request, token);
+                    var content = await response.Content.ReadAsStringAsync();
 
-                _logger.LogInformation($"User info response status: {response.StatusCode}");
-                return StatusCode((int)response.StatusCode, content);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                _logger.LogWarning("User info request failed - no valid token provided");
-                return Unauthorized(new { error = "No valid authorization token provided" });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting user info");
-                return StatusCode(500, new { error = "Internal server error fetching user information" });
+                    _logger.LogInformation(
+                        "User info response - Status: {StatusCode}, ContentLength: {ContentLength}",
+                        response.StatusCode,
+                        content.Length
+                    );
+                    
+                    return StatusCode((int)response.StatusCode, content);
+                }
+                catch (UnauthorizedAccessException uaEx)
+                {
+                    _logger.LogWarning(uaEx, "User info request failed - no valid token provided");
+                    return Unauthorized(new 
+                    { 
+                        error = "No valid authorization token provided",
+                        correlationId = correlationId 
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error getting user info. CorrelationId: {CorrelationId}", correlationId);
+                    return StatusCode(500, new 
+                    { 
+                        error = "Internal server error fetching user information",
+                        correlationId = correlationId 
+                    });
+                }
             }
         }
 
-	[Authorize]
+        [Authorize]
         [HttpPost("logout")]
         public async Task<IActionResult> Logout()
         {
-            try
+            var correlationId = Guid.NewGuid().ToString();
+            
+            using (_logger.BeginScope(new Dictionary<string, object>
             {
-                _logger.LogInformation("Processing logout request");
-                var token = ExtractBearerToken();
-                
-                var authServiceUrl = _config["Services:Auth"];
-                var url = $"{authServiceUrl}/api/auth/logout";
-                
-                var response = await _proxy.ForwardAsync(url, Request, token);
-                var content = await response.Content.ReadAsStringAsync();
+                ["CorrelationId"] = correlationId,
+                ["Endpoint"] = "auth/logout",
+                ["Method"] = Request.Method,
+                ["UserId"] = User.Identity?.Name ?? "unknown"
+            }))
+            {
+                try
+                {
+                    _logger.LogInformation("Processing logout request");
+                    var token = ExtractBearerToken();
+                    
+                    var authServiceUrl = _config["Services:Auth"];
+                    var url = $"{authServiceUrl}/api/auth/logout";
+                    
+                    _logger.LogDebug("Forwarding logout request to: {Url}", url);
+                    var response = await _proxy.ForwardAsync(url, Request, token);
+                    var content = await response.Content.ReadAsStringAsync();
 
-                _logger.LogInformation($"Logout response status: {response.StatusCode}");
-		_authCookie.ClearJwtCookie(Response);
-                return StatusCode((int)response.StatusCode, content);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error processing logout");
-                return StatusCode(500, new { error = "Internal server error during logout" });
+                    _logger.LogInformation(
+                        "Logout response - Status: {StatusCode}",
+                        response.StatusCode
+                    );
+                    
+                    // Clear the JWT cookie
+                    _authCookie.ClearJwtCookie(Response);
+                    _logger.LogInformation("JWT cookie cleared successfully");
+                    
+                    return StatusCode((int)response.StatusCode, content);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing logout. CorrelationId: {CorrelationId}", correlationId);
+                    return StatusCode(500, new 
+                    { 
+                        error = "Internal server error during logout",
+                        correlationId = correlationId 
+                    });
+                }
             }
         }
 
         private string ExtractBearerToken()
         {
             if (Request.Cookies.ContainsKey("access_token"))
-    	    {
-        	var token = Request.Cookies["access_token"];
-        	_logger.LogDebug("Extracted token from cookie");
-        	return token;
-    	    }
-	    var authHeader = Request.Headers["Authorization"].ToString();
+            {
+                var token = Request.Cookies["access_token"];
+                _logger.LogDebug("Extracted token from cookie. Token length: {TokenLength}", token?.Length ?? 0);
+                return token ?? string.Empty;
+            }
+            
+            var authHeader = Request.Headers["Authorization"].ToString();
             
             if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer "))
             {
-                _logger.LogWarning("No Bearer token found in request");
+                _logger.LogWarning("No Bearer token found in request headers or cookies");
                 throw new UnauthorizedAccessException("No valid authorization token provided");
             }
 
-            return authHeader.Replace("Bearer ", "");
+            var tokenFromHeader = authHeader.Replace("Bearer ", "");
+            _logger.LogDebug("Extracted token from Authorization header. Token length: {TokenLength}", tokenFromHeader.Length);
+            return tokenFromHeader;
         }
     }
 }

@@ -16,6 +16,7 @@ node_modules/
 bin/
 obj/
 .vs
+logs/
 
 # Docker
 *.log
