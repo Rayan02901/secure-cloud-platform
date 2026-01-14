@@ -17,6 +17,7 @@ bin/
 obj/
 .vs
 logs/
+appSettings.Docker.json
 
 # Docker
 *.log

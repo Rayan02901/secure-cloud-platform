@@ -7,27 +7,31 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using System.Text.Json;
 using Serilog;  
+using Serilog.Events;
+using OpenTelemetry.Trace; 
+using Prometheus;
 
-// Added Serilog configuration
+var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Development";
+var isDockerEnvironment = environment == "Docker";
+
+// Build configuration
+var configuration = new ConfigurationBuilder()
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddJsonFile($"appsettings.{environment}.json", optional: true, reloadOnChange: true)
+    .AddEnvironmentVariables()
+    .Build();
+
+// Configure Serilog from configuration
 Log.Logger = new LoggerConfiguration()
-    .Enrich.FromLogContext()
-    .WriteTo.Console(
-        outputTemplate:
-        "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {Properties}{NewLine}"
-    )
-    // Write to rolling text files
-    .WriteTo.File(
-        "logs/log-.txt",
-        rollingInterval: RollingInterval.Day,
-        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}"
-    )
+    .ReadFrom.Configuration(configuration)
     .CreateLogger();
 
 try
 {
     var builder = WebApplication.CreateBuilder(args);
     
-    // Used Serilog with the builder
+    // Use Serilog with the builder
     builder.Host.UseSerilog();
     
     builder.Services.AddScoped<IProxyService, ProxyService>();
@@ -66,6 +70,26 @@ try
         });
     });
 
+    // Add OpenTelemetry with Jaeger (MINIMAL CHANGE)
+    builder.Services.AddOpenTelemetry()
+        .WithTracing(tracer =>
+        {
+            tracer
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation()
+                .AddConsoleExporter();
+            
+            // Add Jaeger exporter for Docker environment
+            if (isDockerEnvironment)
+            {
+                tracer.AddJaegerExporter(options =>
+                {
+                    options.AgentHost = "jaeger";
+                    options.AgentPort = 6831;
+                });
+            }
+        });
+
     builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -91,9 +115,11 @@ try
         };
 
     });
-    builder.WebHost.UseUrls("http://0.0.0.0:8000");
+    builder.WebHost.UseUrls("http://0.0.0.0:8000", "http://0.0.0.0:5000");
     builder.Services.AddAuthorization();
     var app = builder.Build();
+    app.UseMetricServer();      // Exposes /metrics endpoint
+    app.UseHttpMetrics();       // Collects HTTP metrics
     if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
     {
         app.UseSwagger();
