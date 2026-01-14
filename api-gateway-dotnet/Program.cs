@@ -119,7 +119,20 @@ try
     builder.Services.AddAuthorization();
     var app = builder.Build();
     app.UseMetricServer();      // Exposes /metrics endpoint
-    app.UseHttpMetrics();       // Collects HTTP metrics
+    // Add HTTP metrics with custom configuration
+    app.UseHttpMetrics(options =>
+    {
+        options.AddCustomLabel("host", context => context.Request.Host.Host);
+        options.AddCustomLabel("endpoint", context => context.Request.Path);
+    
+        // Reduce cardinality by ignoring query strings
+        options.ReduceStatusCodeCardinality = true;
+    
+        // Configure which routes to track
+        options.RequestDuration.Enabled = true;
+        options.RequestCount.Enabled = true;
+        options.InProgress.Enabled = true;
+    });
     if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Docker")
     {
         app.UseSwagger();
